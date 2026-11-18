@@ -1,5 +1,6 @@
 package com.arulm.loaner
 
+import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
@@ -7,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -32,6 +34,7 @@ import java.net.URL
 
 class MainActivity : FragmentActivity() {
     private var pendingUpdateFile: File? = null
+    private val updatePreferences by lazy { getSharedPreferences("updates", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,7 +53,7 @@ class MainActivity : FragmentActivity() {
                         }
                     }
                     val installPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-                        val update = pendingUpdateFile
+                        val update = pendingUpdate()
                         if (update != null && packageManager.canRequestPackageInstalls()) {
                             installApk(update) { vm.message = it }
                         } else if (update != null) {
@@ -71,15 +74,19 @@ class MainActivity : FragmentActivity() {
                                         is UpdateResult.Failed -> { vm.updateDownloadProgress = null; vm.message = result.message }
                                         is UpdateResult.Ready -> {
                                             vm.updateDownloadProgress = null
-                                            pendingUpdateFile = result.file
+                                            rememberPendingUpdate(result.file)
                                             vm.message = "Version ${result.version} downloaded"
                                             if (packageManager.canRequestPackageInstalls()) {
                                                 installApk(result.file) { vm.message = it }
                                             } else {
                                                 vm.message = "Allow Loaner to install updates, then return to continue"
-                                                installPermissionLauncher.launch(
-                                                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")),
-                                                )
+                                                runCatching {
+                                                    installPermissionLauncher.launch(
+                                                        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")),
+                                                    )
+                                                }.onFailure {
+                                                    vm.message = "Could not open install permission settings: ${it.message}"
+                                                }
                                             }
                                         }
                                     }
@@ -91,6 +98,16 @@ class MainActivity : FragmentActivity() {
                         )
                     }
                 }
+            }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val update = pendingUpdate()
+        if (update != null && packageManager.canRequestPackageInstalls()) {
+            window.decorView.post {
+                installApk(update) { message -> Toast.makeText(this, message, Toast.LENGTH_LONG).show() }
             }
         }
     }
@@ -188,13 +205,47 @@ class MainActivity : FragmentActivity() {
         runCatching {
             require(file.exists()) { "Downloaded update is missing" }
             val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/vnd.android.package-archive")
+            val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = uri
+                clipData = ClipData.newRawUri("Loaner update", uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            startActivity(intent)
-        }.onFailure { onError("Could not open Android installer: ${it.message}") }
+            packageManager.queryIntentActivities(installIntent, PackageManager.MATCH_DEFAULT_ONLY).forEach { handler ->
+                grantUriPermission(handler.activityInfo.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            runCatching { startActivity(installIntent) }.getOrElse {
+                val fallback = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "application/vnd.android.package-archive")
+                    clipData = ClipData.newRawUri("Loaner update", uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(fallback)
+            }
+            clearPendingUpdate()
+        }.onFailure {
+            rememberPendingUpdate(file)
+            onError("Could not open Android installer: ${it.message ?: "no compatible installer found"}")
+        }
+    }
+
+    private fun rememberPendingUpdate(file: File) {
+        pendingUpdateFile = file
+        updatePreferences.edit().putString("pendingApk", file.absolutePath).apply()
+    }
+
+    private fun pendingUpdate(): File? {
+        pendingUpdateFile?.takeIf(File::exists)?.let { return it }
+        val path = updatePreferences.getString("pendingApk", null) ?: return null
+        val file = File(path)
+        val updateDirectory = File(cacheDir, "updates")
+        return runCatching {
+            file.canonicalPath.takeIf { it.startsWith(updateDirectory.canonicalPath + File.separator) && file.exists() }?.let(::File)
+        }.getOrNull()?.also { pendingUpdateFile = it }
+    }
+
+    private fun clearPendingUpdate() {
+        pendingUpdateFile = null
+        updatePreferences.edit().remove("pendingApk").apply()
     }
 
     @Suppress("DEPRECATION")
