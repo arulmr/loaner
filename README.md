@@ -16,7 +16,7 @@ Loaner is a private, offline-first Android app for tracking gold loans from bank
 - Optional biometric unlock after a PIN is configured
 - Light and dark appearance modes
 - Complete JSON backup/import (the PIN is deliberately excluded)
-- GitHub Releases update checking
+- In-app GitHub Releases update download and Android installer handoff
 
 Day-based interest uses completed calendar months plus the remaining days. Month-based interest rounds any partial calendar month up to the next full month. Bank due dates are one year after the loan date, minus one day.
 

@@ -484,7 +484,7 @@ private fun SettingsScreen(
         item { SettingsCard(Icons.Default.Upload, "Export backup", "Save lenders, loans, closures, and renewals as JSON") { onExport() } }
         item { SettingsCard(Icons.Default.Download, "Import backup", "Replace current data from a Loaner JSON backup") { onImport() } }
         item { Text("About", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-        item { SettingsCard(Icons.Default.SystemUpdate, "Check for updates", "Find newer APKs from GitHub Releases") { onCheckUpdates() } }
+        item { SettingsCard(Icons.Default.SystemUpdate, "Check for updates", "Download and install newer APKs from GitHub Releases") { onCheckUpdates() } }
         item { Text("Loaner version ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
     if (pinDialog) PinSettingsDialog(vm) { pinDialog = false }
