@@ -19,6 +19,7 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
     var message by mutableStateOf<String?>(null)
     var darkMode by mutableStateOf(prefs.getBoolean("darkMode", false)); private set
     var biometricEnabled by mutableStateOf(hasPin() && prefs.getBoolean("biometricEnabled", false)); private set
+    var updateDownloadProgress by mutableStateOf<Int?>(null)
 
     fun saveLender(lender: Lender) {
         val list = data.lenders.toMutableList()

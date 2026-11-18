@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -146,10 +147,10 @@ private fun DashboardScreen(vm: LoanViewModel) {
                 }
             }
         }
-        item { SummaryCard("Active borrowed", money(borrowed), "${active.size} active loan${if (active.size == 1) "" else "s"}", MaterialTheme.colorScheme.primaryContainer) }
-        item { SummaryCard("Interest till today", money(interest), "Estimated using annual simple interest", Color(0xFFFFE0B2)) }
-        item { SummaryCard("Current total", money(borrowed + interest), "Principal + accrued interest", Color(0xFFE0F2F1)) }
-        item { SummaryCard("Extra paid on closed loans", money(extraPaid), "${closed.size} closed loan${if (closed.size == 1) "" else "s"}", Color(0xFFE8DEF8)) }
+        item { SummaryCard("Active borrowed", money(borrowed), "${active.size} active loan${if (active.size == 1) "" else "s"}", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer) }
+        item { SummaryCard("Interest till today", money(interest), "Estimated using annual simple interest", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer) }
+        item { SummaryCard("Current total", money(borrowed + interest), "Principal + accrued interest", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer) }
+        item { SummaryCard("Extra paid on closed loans", money(extraPaid), "${closed.size} closed loan${if (closed.size == 1) "" else "s"}", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant) }
         val urgent = active.filter { it.lenderType == LenderType.BANK && (LoanCalculator.figures(it).daysToDue ?: 999) <= 30 }
         if (urgent.isNotEmpty()) {
             item { Text("Needs attention", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
@@ -158,8 +159,8 @@ private fun DashboardScreen(vm: LoanViewModel) {
     }
 }
 
-@Composable private fun SummaryCard(title: String, value: String, subtitle: String, color: Color) {
-    Card(colors = CardDefaults.cardColors(containerColor = color), modifier = Modifier.fillMaxWidth()) {
+@Composable private fun SummaryCard(title: String, value: String, subtitle: String, color: Color, contentColor: Color) {
+    Card(colors = CardDefaults.cardColors(containerColor = color, contentColor = contentColor), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(18.dp)) {
             Text(title, style = MaterialTheme.typography.labelLarge)
             Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -213,15 +214,16 @@ private fun LoanListScreen(vm: LoanViewModel) {
 private fun CompactLoanCard(vm: LoanViewModel, loan: Loan) {
     val figures = LoanCalculator.figures(loan)
     val lender = vm.data.lenders.firstOrNull { it.id == loan.lenderId }
-    val bg = when {
-        loan.status == LoanStatus.CLOSED -> MaterialTheme.colorScheme.surfaceVariant
-        loan.lenderType == LenderType.BANK && (figures.daysToDue ?: 999) <= 7 -> Color(0xFFFFCDD2)
-        loan.lenderType == LenderType.BANK && (figures.daysToDue ?: 999) <= 30 -> Color(0xFFFFE0B2)
-        else -> MaterialTheme.colorScheme.surface
+    val darkTheme = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val (bg, content) = when {
+        loan.status == LoanStatus.CLOSED -> MaterialTheme.colorScheme.surfaceVariant to MaterialTheme.colorScheme.onSurfaceVariant
+        loan.lenderType == LenderType.BANK && (figures.daysToDue ?: 999) <= 7 -> if (darkTheme) Color(0xFF5C1F1F) to Color(0xFFFFDAD6) else Color(0xFFFFCDD2) to Color(0xFF410002)
+        loan.lenderType == LenderType.BANK && (figures.daysToDue ?: 999) <= 30 -> if (darkTheme) Color(0xFF513A00) to Color(0xFFFFDEA5) else Color(0xFFFFE0B2) to Color(0xFF261900)
+        else -> MaterialTheme.colorScheme.surface to MaterialTheme.colorScheme.onSurface
     }
     Card(
         modifier = Modifier.fillMaxWidth().clickable { vm.screen = Screen.LoanDetails(loan.id) },
-        colors = CardDefaults.cardColors(containerColor = bg), elevation = CardDefaults.cardElevation(2.dp),
+        colors = CardDefaults.cardColors(containerColor = bg, contentColor = content), elevation = CardDefaults.cardElevation(2.dp),
     ) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -485,6 +487,19 @@ private fun SettingsScreen(
         item { SettingsCard(Icons.Default.Download, "Import backup", "Replace current data from a Loaner JSON backup") { onImport() } }
         item { Text("About", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
         item { SettingsCard(Icons.Default.SystemUpdate, "Check for updates", "Download and install newer APKs from GitHub Releases") { onCheckUpdates() } }
+        vm.updateDownloadProgress?.let { progress ->
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Downloading update", fontWeight = FontWeight.Bold)
+                            Text("$progress%")
+                        }
+                        LinearProgressIndicator(progress = { progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        }
         item { Text("Loaner version ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
     if (pinDialog) PinSettingsDialog(vm) { pinDialog = false }

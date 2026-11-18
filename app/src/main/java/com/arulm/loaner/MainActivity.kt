@@ -65,10 +65,12 @@ class MainActivity : FragmentActivity() {
                             onCheckUpdates = {
                                 scope.launch {
                                     vm.message = "Checking for and downloading updates…"
-                                    when (val result = downloadLatestUpdate()) {
-                                        is UpdateResult.NoUpdate -> vm.message = result.message
-                                        is UpdateResult.Failed -> vm.message = result.message
+                                    vm.updateDownloadProgress = 0
+                                    when (val result = downloadLatestUpdate { percent -> vm.updateDownloadProgress = percent }) {
+                                        is UpdateResult.NoUpdate -> { vm.updateDownloadProgress = null; vm.message = result.message }
+                                        is UpdateResult.Failed -> { vm.updateDownloadProgress = null; vm.message = result.message }
                                         is UpdateResult.Ready -> {
+                                            vm.updateDownloadProgress = null
                                             pendingUpdateFile = result.file
                                             vm.message = "Version ${result.version} downloaded"
                                             if (packageManager.canRequestPackageInstalls()) {
@@ -118,7 +120,7 @@ class MainActivity : FragmentActivity() {
         )
     }
 
-    private suspend fun downloadLatestUpdate(): UpdateResult = withContext(Dispatchers.IO) {
+    private suspend fun downloadLatestUpdate(onProgress: suspend (Int) -> Unit): UpdateResult = withContext(Dispatchers.IO) {
         try {
             val connection = (URL("https://api.github.com/repos/arulmr/loaner/releases/latest").openConnection() as HttpURLConnection).apply {
                 connectTimeout = 10000; readTimeout = 15000
@@ -152,7 +154,24 @@ class MainActivity : FragmentActivity() {
                 setRequestProperty("User-Agent", "Loaner-Android/${BuildConfig.VERSION_NAME}")
             }
             require(download.responseCode in 200..299) { "Download returned ${download.responseCode}" }
-            val downloadedSize = download.inputStream.use { input -> temp.outputStream().use { output -> input.copyTo(output) } }
+            var downloadedSize = 0L
+            var lastProgress = -1
+            download.inputStream.use { input ->
+                temp.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                        downloadedSize += count
+                        val progress = ((downloadedSize * 100L) / expectedSize).toInt().coerceIn(0, 100)
+                        if (progress != lastProgress) {
+                            lastProgress = progress
+                            withContext(Dispatchers.Main) { onProgress(progress) }
+                        }
+                    }
+                }
+            }
             require(downloadedSize == expectedSize) { "Downloaded APK is incomplete" }
             require(temp.renameTo(apk)) { "Could not prepare downloaded APK" }
             validateDownloadedApk(apk, latest)?.let { validationError ->
