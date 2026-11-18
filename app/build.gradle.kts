@@ -14,8 +14,8 @@ android {
         applicationId = "com.arulm.loaner"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -65,6 +65,7 @@ dependencies {
     implementation("androidx.compose.material3:material3:1.3.2")
     implementation("androidx.compose.material:material-icons-extended:1.7.8")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("androidx.biometric:biometric:1.1.0")
     debugImplementation("androidx.compose.ui:ui-tooling:1.8.3")
     testImplementation("junit:junit:4.13.2")
 }

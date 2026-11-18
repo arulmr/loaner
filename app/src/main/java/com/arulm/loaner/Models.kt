@@ -9,6 +9,10 @@ import java.util.UUID
 import kotlin.math.max
 
 enum class LenderType(val label: String) { BANK("Bank"), PAWN_SHOP("Pawn shop") }
+enum class InterestCalculation(val label: String, val description: String) {
+    MONTH_BASED("Month based", "Any partial month rounds up"),
+    DAY_BASED("Day based", "Completed months plus remaining days"),
+}
 enum class LoanStatus { ACTIVE, CLOSED }
 enum class LoanSort(val label: String) {
     LOAN_DATE("Loan date"), LOAN_AMOUNT("Loan amount"), TOTAL_AMOUNT("Total amount"),
@@ -20,6 +24,7 @@ data class Lender(
     val name: String,
     val type: LenderType,
     val active: Boolean = true,
+    val interestCalculation: InterestCalculation = InterestCalculation.DAY_BASED,
 )
 
 data class LoanCycle(
@@ -36,7 +41,7 @@ data class Loan(
     val lenderType: LenderType,
     val holderName: String,
     val loanNumber: String,
-    val goldWeightGrams: Double,
+    val goldWeightGrams: Double?,
     val loanAmount: Double,
     val annualInterestRate: Double,
     val loanDate: LocalDate,
@@ -44,6 +49,7 @@ data class Loan(
     val closedOn: LocalDate? = null,
     val totalRepaid: Double? = null,
     val history: List<LoanCycle> = emptyList(),
+    val interestCalculation: InterestCalculation = InterestCalculation.DAY_BASED,
 )
 
 data class AppData(val lenders: List<Lender> = emptyList(), val loans: List<Loan> = emptyList())
@@ -62,17 +68,24 @@ data class LoanFigures(
 object LoanCalculator {
     fun figures(loan: Loan, today: LocalDate = LocalDate.now()): LoanFigures {
         val endDate = loan.closedOn ?: today
-        val elapsed = max(0, ChronoUnit.DAYS.between(loan.loanDate, endDate))
+        val safeEnd = if (endDate.isBefore(loan.loanDate)) loan.loanDate else endDate
+        val elapsed = max(0, ChronoUnit.DAYS.between(loan.loanDate, safeEnd))
         val yearly = loan.loanAmount * loan.annualInterestRate / 100.0
-        val interest = yearly * elapsed / 365.0
+        val calendarPeriod = Period.between(loan.loanDate, safeEnd)
+        val completedMonths = calendarPeriod.years * 12 + calendarPeriod.months
+        val monthly = yearly / 12.0
+        val interest = when (loan.interestCalculation) {
+            InterestCalculation.MONTH_BASED -> monthly * (completedMonths + if (calendarPeriod.days > 0) 1 else 0)
+            InterestCalculation.DAY_BASED -> monthly * completedMonths + (yearly / 365.0 * calendarPeriod.days)
+        }
         val due = if (loan.lenderType == LenderType.BANK) loan.loanDate.plusYears(1).minusDays(1) else null
         return LoanFigures(
-            monthlyInterest = yearly / 12.0,
+            monthlyInterest = monthly,
             yearlyInterest = yearly,
             interestTillDate = interest,
             totalAmount = loan.loanAmount + interest,
             elapsedDays = elapsed,
-            period = formatPeriod(loan.loanDate, endDate),
+            period = formatPeriod(loan.loanDate, safeEnd),
             dueDate = due,
             daysToDue = due?.let { ChronoUnit.DAYS.between(today, it) },
         )
@@ -98,6 +111,7 @@ fun AppData.toJson(): JSONObject = JSONObject().apply {
 
 private fun Lender.toJson() = JSONObject().apply {
     put("id", id); put("name", name); put("type", type.name); put("active", active)
+    put("interestCalculation", interestCalculation.name)
 }
 
 private fun LoanCycle.toJson() = JSONObject().apply {
@@ -109,18 +123,22 @@ private fun LoanCycle.toJson() = JSONObject().apply {
 private fun Loan.toJson() = JSONObject().apply {
     put("id", id); put("lenderId", lenderId); put("lenderType", lenderType.name)
     put("holderName", holderName); put("loanNumber", loanNumber)
-    put("goldWeightGrams", goldWeightGrams); put("loanAmount", loanAmount)
+    put("goldWeightGrams", goldWeightGrams ?: JSONObject.NULL); put("loanAmount", loanAmount)
     put("annualInterestRate", annualInterestRate); put("loanDate", loanDate.toString())
     put("status", status.name); put("closedOn", closedOn?.toString() ?: JSONObject.NULL)
     put("totalRepaid", totalRepaid ?: JSONObject.NULL)
     put("history", JSONArray().apply { history.forEach { put(it.toJson()) } })
+    put("interestCalculation", interestCalculation.name)
 }
 
 fun appDataFromJson(text: String): AppData {
     val root = JSONObject(text)
     require(root.optInt("formatVersion", 1) == 1) { "Unsupported backup format" }
     val lenders = root.getJSONArray("lenders").mapObjects { o ->
-        Lender(o.getString("id"), o.getString("name"), LenderType.valueOf(o.getString("type")), o.getBoolean("active"))
+        Lender(
+            o.getString("id"), o.getString("name"), LenderType.valueOf(o.getString("type")), o.getBoolean("active"),
+            InterestCalculation.valueOf(o.optString("interestCalculation", InterestCalculation.DAY_BASED.name)),
+        )
     }
     val loans = root.getJSONArray("loans").mapObjects { o ->
         val history = o.optJSONArray("history")?.mapObjects { h ->
@@ -128,10 +146,11 @@ fun appDataFromJson(text: String): AppData {
         } ?: emptyList()
         Loan(
             id = o.getString("id"), lenderId = o.getString("lenderId"), lenderType = LenderType.valueOf(o.getString("lenderType")),
-            holderName = o.getString("holderName"), loanNumber = o.getString("loanNumber"), goldWeightGrams = o.getDouble("goldWeightGrams"),
+            holderName = o.getString("holderName"), loanNumber = o.getString("loanNumber"), goldWeightGrams = if (o.isNull("goldWeightGrams")) null else o.getDouble("goldWeightGrams"),
             loanAmount = o.getDouble("loanAmount"), annualInterestRate = o.getDouble("annualInterestRate"), loanDate = LocalDate.parse(o.getString("loanDate")),
             status = LoanStatus.valueOf(o.getString("status")), closedOn = o.optString("closedOn").takeIf { it.isNotBlank() && it != "null" }?.let(LocalDate::parse),
             totalRepaid = if (o.isNull("totalRepaid")) null else o.getDouble("totalRepaid"), history = history,
+            interestCalculation = InterestCalculation.valueOf(o.optString("interestCalculation", InterestCalculation.DAY_BASED.name)),
         )
     }
     require(loans.all { loan -> lenders.any { it.id == loan.lenderId } }) { "Backup contains loans with missing lenders" }

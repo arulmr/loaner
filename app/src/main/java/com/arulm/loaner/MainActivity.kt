@@ -3,7 +3,7 @@ package com.arulm.loaner
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,6 +14,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.biometric.BiometricManager
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -21,13 +24,13 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            LoanerTheme {
+            val vm: LoanViewModel = viewModel()
+            LoanerTheme(darkTheme = vm.darkMode) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    val vm: LoanViewModel = viewModel()
                     val scope = rememberCoroutineScope()
                     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
                         uri?.let { contentResolver.openOutputStream(it)?.bufferedWriter()?.use { writer -> writer.write(vm.exportJson()) } }
@@ -51,11 +54,39 @@ class MainActivity : ComponentActivity() {
                                     result.second?.let { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it))) }
                                 }
                             },
+                            onExit = { finish() },
+                            biometricAvailable = biometricAvailable(),
+                            onBiometricAuth = { onSuccess -> showBiometricPrompt(onSuccess) { vm.message = it } },
                         )
                     }
                 }
             }
         }
+    }
+
+    private fun biometricAvailable(): Boolean = BiometricManager.from(this)
+        .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_WEAK) == BiometricManager.BIOMETRIC_SUCCESS
+
+    private fun showBiometricPrompt(onSuccess: () -> Unit, onError: (String) -> Unit) {
+        if (!biometricAvailable()) {
+            onError("No enrolled biometric is available on this device")
+            return
+        }
+        val prompt = BiometricPrompt(this, ContextCompat.getMainExecutor(this), object : BiometricPrompt.AuthenticationCallback() {
+            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) = onSuccess()
+            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                if (errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON && errorCode != BiometricPrompt.ERROR_USER_CANCELED) onError(errString.toString())
+            }
+            override fun onAuthenticationFailed() = onError("Biometric not recognized")
+        })
+        prompt.authenticate(
+            BiometricPrompt.PromptInfo.Builder()
+                .setTitle("Unlock Loaner")
+                .setSubtitle("Confirm your identity")
+                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
+                .setNegativeButtonText("Use PIN")
+                .build(),
+        )
     }
 
     private suspend fun checkLatestRelease(): Pair<String, String?> = withContext(Dispatchers.IO) {

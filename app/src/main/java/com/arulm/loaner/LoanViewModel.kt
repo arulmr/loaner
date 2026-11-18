@@ -17,12 +17,15 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
     var unlocked by mutableStateOf(!hasPin()); private set
     var screen by mutableStateOf<Screen>(Screen.Dashboard)
     var message by mutableStateOf<String?>(null)
+    var darkMode by mutableStateOf(prefs.getBoolean("darkMode", false)); private set
+    var biometricEnabled by mutableStateOf(hasPin() && prefs.getBoolean("biometricEnabled", false)); private set
 
     fun saveLender(lender: Lender) {
         val list = data.lenders.toMutableList()
         val index = list.indexOfFirst { it.id == lender.id }
         if (index >= 0) list[index] = lender else list.add(lender)
-        update(data.copy(lenders = list.sortedBy { it.name.lowercase() }))
+        val loans = data.loans.map { if (it.lenderId == lender.id) it.copy(interestCalculation = lender.interestCalculation) else it }
+        update(data.copy(lenders = list.sortedBy { it.name.lowercase() }, loans = loans))
     }
 
     fun saveLoan(loan: Loan) {
@@ -49,10 +52,19 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
     fun hasPin(): Boolean = prefs.contains("pinHash")
     fun verifyPin(pin: String): Boolean = hash(pin) == prefs.getString("pinHash", null).also { if (hash(pin) == it) unlocked = true }
     fun setPin(pin: String?) {
-        if (pin == null) prefs.edit().remove("pinHash").apply() else prefs.edit().putString("pinHash", hash(pin)).apply()
+        if (pin == null) {
+            prefs.edit().remove("pinHash").putBoolean("biometricEnabled", false).apply()
+            biometricEnabled = false
+        } else prefs.edit().putString("pinHash", hash(pin)).apply()
         unlocked = true
     }
     fun lock() { if (hasPin()) unlocked = false }
+    fun updateDarkMode(enabled: Boolean) { darkMode = enabled; prefs.edit().putBoolean("darkMode", enabled).apply() }
+    fun updateBiometricEnabled(enabled: Boolean) {
+        biometricEnabled = enabled && hasPin()
+        prefs.edit().putBoolean("biometricEnabled", biometricEnabled).apply()
+    }
+    fun unlockWithBiometric() { if (biometricEnabled) unlocked = true }
 
     private fun update(newData: AppData) { data = newData; repository.save(newData) }
     private fun hash(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }

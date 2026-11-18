@@ -22,6 +22,23 @@ class LoanCalculatorTest {
         assertEquals(100.0, figures.monthlyInterest, 0.01)
     }
 
+    @Test fun monthBasedRoundsPartialMonthUp() {
+        val loan = sample(LenderType.BANK, LocalDate.of(2025, 1, 10)).copy(interestCalculation = InterestCalculation.MONTH_BASED)
+        val figures = LoanCalculator.figures(loan, LocalDate.of(2025, 7, 15))
+        assertEquals(700.0, figures.interestTillDate, 0.01)
+    }
+
+    @Test fun monthBasedDoesNotRoundExactMonth() {
+        val loan = sample(LenderType.BANK, LocalDate.of(2025, 1, 10)).copy(interestCalculation = InterestCalculation.MONTH_BASED)
+        assertEquals(600.0, LoanCalculator.figures(loan, LocalDate.of(2025, 7, 10)).interestTillDate, 0.01)
+    }
+
+    @Test fun dayBasedAddsRemainingDaysToCompletedMonths() {
+        val loan = sample(LenderType.BANK, LocalDate.of(2025, 1, 10)).copy(interestCalculation = InterestCalculation.DAY_BASED)
+        val expected = 600.0 + (1200.0 / 365.0 * 5.0)
+        assertEquals(expected, LoanCalculator.figures(loan, LocalDate.of(2025, 7, 15)).interestTillDate, 0.01)
+    }
+
     private fun sample(type: LenderType, date: LocalDate) = Loan(
         lenderId = "lender", lenderType = type, holderName = "Holder", loanNumber = "1",
         goldWeightGrams = 10.0, loanAmount = 10000.0, annualInterestRate = 12.0, loanDate = date,

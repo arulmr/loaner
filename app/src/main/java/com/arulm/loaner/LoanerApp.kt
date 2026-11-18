@@ -2,6 +2,8 @@
 
 package com.arulm.loaner
 
+import android.app.DatePickerDialog
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -14,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -32,19 +35,38 @@ private fun money(value: Double) = moneyFormat.format(value)
 private fun date(value: LocalDate) = value.format(displayDate)
 
 @Composable
-fun LoanerApp(vm: LoanViewModel, onExport: () -> Unit, onImport: () -> Unit, onCheckUpdates: () -> Unit) {
+fun LoanerApp(
+    vm: LoanViewModel,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    onCheckUpdates: () -> Unit,
+    onExit: () -> Unit,
+    biometricAvailable: Boolean,
+    onBiometricAuth: (() -> Unit) -> Unit,
+) {
     if (!vm.unlocked) {
-        PinGate(vm)
+        PinGate(vm, biometricAvailable, onBiometricAuth, onExit)
         return
     }
+    var exitDialog by remember { mutableStateOf(false) }
     val rootScreens = listOf(Screen.Dashboard, Screen.Loans, Screen.Lenders, Screen.Settings)
     val root = vm.screen in rootScreens
+    fun navigateBack() {
+        vm.screen = when (vm.screen) {
+            is Screen.EditLender -> Screen.Lenders
+            is Screen.LoanDetails, is Screen.EditLoan -> Screen.Loans
+            else -> vm.screen
+        }
+    }
+    BackHandler {
+        if (root) exitDialog = true else navigateBack()
+    }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(screenTitle(vm.screen)) },
                 navigationIcon = {
-                    if (!root) IconButton(onClick = { vm.screen = Screen.Loans }) { Icon(Icons.Default.ArrowBack, "Back") }
+                    if (!root) IconButton(onClick = ::navigateBack) { Icon(Icons.Default.ArrowBack, "Back") }
                 },
             )
         },
@@ -67,13 +89,20 @@ fun LoanerApp(vm: LoanViewModel, onExport: () -> Unit, onImport: () -> Unit, onC
                 Screen.Dashboard -> DashboardScreen(vm)
                 Screen.Loans -> LoanListScreen(vm)
                 Screen.Lenders -> LenderListScreen(vm)
-                Screen.Settings -> SettingsScreen(vm, onExport, onImport, onCheckUpdates)
+                Screen.Settings -> SettingsScreen(vm, onExport, onImport, onCheckUpdates, biometricAvailable, onBiometricAuth)
                 is Screen.LoanDetails -> LoanDetailsScreen(vm, screen.id)
                 is Screen.EditLoan -> LoanFormScreen(vm, screen.id)
                 is Screen.EditLender -> LenderFormScreen(vm, screen.id)
             }
         }
     }
+    if (exitDialog) AlertDialog(
+        onDismissRequest = { exitDialog = false },
+        title = { Text("Exit Loaner?") },
+        text = { Text("Are you sure you want to close the app?") },
+        confirmButton = { TextButton(onClick = onExit) { Text("Exit") } },
+        dismissButton = { TextButton(onClick = { exitDialog = false }) { Text("Cancel") } },
+    )
 }
 
 private fun screenTitle(screen: Screen) = when (screen) {
@@ -92,8 +121,11 @@ private fun screenTitle(screen: Screen) = when (screen) {
 
 @Composable
 private fun DashboardScreen(vm: LoanViewModel) {
-    val active = vm.data.loans.filter { it.status == LoanStatus.ACTIVE }
-    val closed = vm.data.loans.filter { it.status == LoanStatus.CLOSED }
+    var lenderType by remember { mutableStateOf<LenderType?>(null) }
+    var lenderId by remember { mutableStateOf<String?>(null) }
+    val matching = vm.data.loans.filter { (lenderType == null || it.lenderType == lenderType) && (lenderId == null || it.lenderId == lenderId) }
+    val active = matching.filter { it.status == LoanStatus.ACTIVE }
+    val closed = matching.filter { it.status == LoanStatus.CLOSED }
     val borrowed = active.sumOf { it.loanAmount }
     val interest = active.sumOf { LoanCalculator.figures(it).interestTillDate }
     val extraPaid = closed.sumOf { (it.totalRepaid ?: 0.0) - it.loanAmount }.coerceAtLeast(0.0)
@@ -101,6 +133,18 @@ private fun DashboardScreen(vm: LoanViewModel) {
         item {
             Text("Your gold loans", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("A current snapshot across all lenders", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.weight(1f)) { NullableDropdown("Lender type", lenderType, LenderType.entries, { it.label }) { lenderType = it; lenderId = null } }
+                Box(Modifier.weight(1f)) {
+                    NullableDropdown(
+                        "Lender", lenderId,
+                        vm.data.lenders.filter { lenderType == null || it.type == lenderType }.map { it.id },
+                        { id -> vm.data.lenders.firstOrNull { it.id == id }?.name ?: "" },
+                    ) { lenderId = it }
+                }
+            }
         }
         item { SummaryCard("Active borrowed", money(borrowed), "${active.size} active loan${if (active.size == 1) "" else "s"}", MaterialTheme.colorScheme.primaryContainer) }
         item { SummaryCard("Interest till today", money(interest), "Estimated using annual simple interest", Color(0xFFFFE0B2)) }
@@ -210,7 +254,7 @@ private fun LenderListScreen(vm: LoanViewModel) {
                     Row(Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Icon(if (lender.type == LenderType.BANK) Icons.Default.AccountBalance else Icons.Default.Store, null)
                         Spacer(Modifier.width(14.dp))
-                        Column(Modifier.weight(1f)) { Text(lender.name, fontWeight = FontWeight.Bold); Text(lender.type.label) }
+                        Column(Modifier.weight(1f)) { Text(lender.name, fontWeight = FontWeight.Bold); Text("${lender.type.label} • ${lender.interestCalculation.label}") }
                         AssistChip(onClick = {}, label = { Text(if (lender.active) "Active" else "Inactive") })
                     }
                 }
@@ -232,10 +276,13 @@ private fun LenderFormScreen(vm: LoanViewModel, id: String?) {
     var name by remember(id) { mutableStateOf(existing?.name ?: "") }
     var type by remember(id) { mutableStateOf(existing?.type ?: LenderType.BANK) }
     var active by remember(id) { mutableStateOf(existing?.active ?: true) }
+    var interestCalculation by remember(id) { mutableStateOf(existing?.interestCalculation ?: InterestCalculation.DAY_BASED) }
     var error by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         DropdownField("Type", type, LenderType.entries, { it.label }) { type = it }
+        DropdownField("Interest calculation", interestCalculation, InterestCalculation.entries, { it.label }) { interestCalculation = it }
+        Text(interestCalculation.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Checkbox(active, { active = it }); Text("Active lender")
         }
@@ -245,7 +292,7 @@ private fun LenderFormScreen(vm: LoanViewModel, id: String?) {
                 name.isBlank() -> error = "Name is required"
                 vm.data.lenders.any { it.id != id && it.name.equals(name.trim(), true) && it.type == type } -> error = "This lender already exists"
                 else -> {
-                    vm.saveLender(Lender(existing?.id ?: java.util.UUID.randomUUID().toString(), name.trim(), type, active))
+                    vm.saveLender(Lender(existing?.id ?: java.util.UUID.randomUUID().toString(), name.trim(), type, active, interestCalculation))
                     vm.screen = Screen.Lenders
                 }
             }
@@ -275,10 +322,10 @@ private fun LoanFormScreen(vm: LoanViewModel, id: String?) {
             holders.forEach { suggestion -> TextButton(onClick = { holder = suggestion }) { Text(suggestion) } }
         }
         item { OutlinedTextField(loanNumber, { loanNumber = it }, label = { Text("Loan number") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
-        item { NumberField("Gold weight (g)", weight) { weight = it } }
+        item { NumberField("Gold weight (g) — optional", weight) { weight = it } }
         item { NumberField("Loan amount (₹)", amount) { amount = it } }
         item { NumberField("Annual interest rate (%)", rate) { rate = it } }
-        item { DateField("Loan date (YYYY-MM-DD)", loanDate) { loanDate = it } }
+        item { DateField("Loan date", loanDate) { loanDate = it } }
         item {
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Button(onClick = {
@@ -290,7 +337,7 @@ private fun LoanFormScreen(vm: LoanViewModel, id: String?) {
                     lenderId == null -> "Select a lender"
                     holder.isBlank() -> "Loan holder name is required"
                     loanNumber.isBlank() -> "Loan number is required"
-                    parsedWeight == null || parsedWeight <= 0 -> "Enter a valid gold weight"
+                    weight.isNotBlank() && (parsedWeight == null || parsedWeight <= 0) -> "Enter a valid gold weight or leave it blank"
                     parsedAmount == null || parsedAmount <= 0 -> "Enter a valid loan amount"
                     parsedRate == null || parsedRate < 0 -> "Enter a valid interest rate"
                     parsedDate == null -> "Use date format YYYY-MM-DD"
@@ -299,10 +346,11 @@ private fun LoanFormScreen(vm: LoanViewModel, id: String?) {
                 if (error == null) {
                     vm.saveLoan(Loan(
                         id = existing?.id ?: java.util.UUID.randomUUID().toString(), lenderId = lenderId!!, lenderType = type,
-                        holderName = holder.trim(), loanNumber = loanNumber.trim(), goldWeightGrams = parsedWeight!!,
+                        holderName = holder.trim(), loanNumber = loanNumber.trim(), goldWeightGrams = parsedWeight,
                         loanAmount = parsedAmount!!, annualInterestRate = parsedRate!!, loanDate = parsedDate!!,
                         status = existing?.status ?: LoanStatus.ACTIVE, closedOn = existing?.closedOn, totalRepaid = existing?.totalRepaid,
                         history = existing?.history ?: emptyList(),
+                        interestCalculation = vm.data.lenders.first { it.id == lenderId }.interestCalculation,
                     ))
                     vm.screen = Screen.Loans
                 }
@@ -328,10 +376,9 @@ private fun LoanDetailsScreen(vm: LoanViewModel, id: String) {
                 }
             }
         }
-        item { DetailSection("Loan", listOf("Principal" to money(loan.loanAmount), "Gold weight" to "${loan.goldWeightGrams} g", "Loan date" to date(loan.loanDate), "Period" to figures.period, "Annual rate" to "${loan.annualInterestRate}%")) }
+        item { DetailSection("Loan", listOf("Principal" to money(loan.loanAmount), "Gold weight" to (loan.goldWeightGrams?.let { "$it g" } ?: "Not entered"), "Loan date" to date(loan.loanDate), "Period" to figures.period, "Annual rate" to "${loan.annualInterestRate}%", "Interest method" to loan.interestCalculation.label)) }
         item {
-            val rows = mutableListOf("Monthly interest" to money(figures.monthlyInterest), "Interest till date" to money(figures.interestTillDate), "Total amount" to money(figures.totalAmount))
-            if (loan.lenderType == LenderType.PAWN_SHOP) rows.add(1, "Yearly interest" to money(figures.yearlyInterest))
+            val rows = mutableListOf("Monthly interest" to money(figures.monthlyInterest), "Yearly interest" to money(figures.yearlyInterest), "Interest till date" to money(figures.interestTillDate), "Total amount" to money(figures.totalAmount))
             figures.dueDate?.let { rows.add("Due date" to date(it)) }
             DetailSection("Calculated amounts", rows)
         }
@@ -406,14 +453,33 @@ private fun LoanDetailsScreen(vm: LoanViewModel, id: String) {
 }
 
 @Composable
-private fun SettingsScreen(vm: LoanViewModel, onExport: () -> Unit, onImport: () -> Unit, onCheckUpdates: () -> Unit) {
+private fun SettingsScreen(
+    vm: LoanViewModel,
+    onExport: () -> Unit,
+    onImport: () -> Unit,
+    onCheckUpdates: () -> Unit,
+    biometricAvailable: Boolean,
+    onBiometricAuth: (() -> Unit) -> Unit,
+) {
     var pinDialog by remember { mutableStateOf(false) }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item { Text("Appearance", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+        item { SettingsCard(if (vm.darkMode) Icons.Default.DarkMode else Icons.Default.LightMode, if (vm.darkMode) "Dark mode" else "Light mode", "Tap to switch the app theme") { vm.updateDarkMode(!vm.darkMode) } }
         item { Text("Security", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
         item {
             SettingsCard(Icons.Default.Lock, if (vm.hasPin()) "Change or remove PIN" else "Set a 4-digit PIN", "PIN is stored only on this device and never exported") { pinDialog = true }
         }
         if (vm.hasPin()) item { SettingsCard(Icons.Default.LockOpen, "Lock now", "Require the PIN to return to your loans") { vm.lock() } }
+        if (vm.hasPin()) item {
+            val enabled = vm.biometricEnabled
+            SettingsCard(Icons.Default.Fingerprint, if (enabled) "Biometric unlock enabled" else "Enable biometric unlock", if (biometricAvailable) "Optional; your PIN remains available as fallback" else "No enrolled biometric is available") {
+                when {
+                    enabled -> vm.updateBiometricEnabled(false)
+                    !biometricAvailable -> vm.message = "Set up fingerprint or face unlock in Android settings first"
+                    else -> onBiometricAuth { vm.updateBiometricEnabled(true); vm.message = "Biometric unlock enabled" }
+                }
+            }
+        }
         item { Text("Data", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
         item { SettingsCard(Icons.Default.Upload, "Export backup", "Save lenders, loans, closures, and renewals as JSON") { onExport() } }
         item { SettingsCard(Icons.Default.Download, "Import backup", "Replace current data from a Loaner JSON backup") { onImport() } }
@@ -452,9 +518,11 @@ private fun SettingsScreen(vm: LoanViewModel, onExport: () -> Unit, onImport: ()
     }) { Text("Save") } }, dismissButton = { TextButton(onClick = dismiss) { Text("Cancel") } })
 }
 
-@Composable private fun PinGate(vm: LoanViewModel) {
+@Composable private fun PinGate(vm: LoanViewModel, biometricAvailable: Boolean, onBiometricAuth: (() -> Unit) -> Unit, onExit: () -> Unit) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
+    var exitDialog by remember { mutableStateOf(false) }
+    BackHandler { exitDialog = true }
     fun press(value: String) {
         if (pin.length < 4) pin += value
         if (pin.length == 4) {
@@ -465,6 +533,9 @@ private fun SettingsScreen(vm: LoanViewModel, onExport: () -> Unit, onImport: ()
         Icon(Icons.Default.Lock, null, modifier = Modifier.size(54.dp), tint = MaterialTheme.colorScheme.primary)
         Text("Loaner is locked", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(if (error) "Incorrect PIN. Try again." else "Enter your 4-digit PIN", color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        if (vm.biometricEnabled && biometricAvailable) {
+            TextButton(onClick = { onBiometricAuth { vm.unlockWithBiometric() } }) { Icon(Icons.Default.Fingerprint, null); Spacer(Modifier.width(6.dp)); Text("Unlock with biometric") }
+        }
         Spacer(Modifier.height(18.dp))
         Text("●".repeat(pin.length) + "○".repeat(4 - pin.length), style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(18.dp))
@@ -477,6 +548,13 @@ private fun SettingsScreen(vm: LoanViewModel, onExport: () -> Unit, onImport: ()
             Spacer(Modifier.height(8.dp))
         }
     }
+    if (exitDialog) AlertDialog(
+        onDismissRequest = { exitDialog = false },
+        title = { Text("Exit Loaner?") },
+        text = { Text("Are you sure you want to close the app?") },
+        confirmButton = { TextButton(onClick = onExit) { Text("Exit") } },
+        dismissButton = { TextButton(onClick = { exitDialog = false }) { Text("Cancel") } },
+    )
 }
 
 @Composable private fun PinField(label: String, value: String, onChange: (String) -> Unit) = OutlinedTextField(
@@ -487,9 +565,29 @@ private fun SettingsScreen(vm: LoanViewModel, onExport: () -> Unit, onImport: ()
     value, { onChange(it.filter { c -> c.isDigit() || c == '.' }) }, label = { Text(label) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), singleLine = true, modifier = Modifier.fillMaxWidth(),
 )
 
-@Composable private fun DateField(label: String, value: String, onChange: (String) -> Unit) = OutlinedTextField(
-    value, onChange, label = { Text(label) }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth(), supportingText = { Text("Example: 2026-11-18") },
-)
+@Composable private fun DateField(label: String, value: String, onChange: (String) -> Unit) {
+    val context = LocalContext.current
+    val selected = value.toDateOrNull() ?: LocalDate.now()
+    fun showCalendar() {
+        DatePickerDialog(
+            context,
+            { _, year, month, day -> onChange(LocalDate.of(year, month + 1, day).toString()) },
+            selected.year,
+            selected.monthValue - 1,
+            selected.dayOfMonth,
+        ).show()
+    }
+    OutlinedTextField(
+        value = value,
+        onValueChange = {},
+        readOnly = true,
+        label = { Text(label) },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth(),
+        trailingIcon = { IconButton(onClick = ::showCalendar) { Icon(Icons.Default.CalendarMonth, "Choose date") } },
+        supportingText = { Text(value.toDateOrNull()?.let(::date) ?: "Choose a date") },
+    )
+}
 
 private fun String.toDateOrNull(): LocalDate? = try { LocalDate.parse(this) } catch (_: DateTimeParseException) { null }
 
