@@ -368,6 +368,7 @@ private fun LoanDetailsScreen(vm: LoanViewModel, id: String) {
     val figures = LoanCalculator.figures(loan)
     var closeDialog by remember { mutableStateOf(false) }
     var renewDialog by remember { mutableStateOf(false) }
+    var deleteDialog by remember { mutableStateOf(false) }
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), modifier = Modifier.fillMaxWidth()) {
@@ -407,9 +408,33 @@ private fun LoanDetailsScreen(vm: LoanViewModel, id: String) {
             }
             TextButton(onClick = { vm.screen = Screen.EditLoan(loan.id) }, modifier = Modifier.fillMaxWidth()) { Text("Edit loan details") }
         }
+        item {
+            TextButton(
+                onClick = { deleteDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) {
+                Icon(Icons.Default.DeleteForever, null)
+                Spacer(Modifier.width(6.dp))
+                Text("Delete loan")
+            }
+        }
     }
     if (closeDialog) CloseLoanDialog(loan, { closeDialog = false }) { amount, closedOn -> vm.closeLoan(loan.id, amount, closedOn); closeDialog = false }
     if (renewDialog) RenewLoanDialog(loan, { renewDialog = false }) { amount, loanDate, rate, paid -> vm.renewLoan(loan.id, amount, loanDate, rate, paid); renewDialog = false }
+    if (deleteDialog) AlertDialog(
+        onDismissRequest = { deleteDialog = false },
+        icon = { Icon(Icons.Default.Warning, null, tint = MaterialTheme.colorScheme.error) },
+        title = { Text("Delete this loan?") },
+        text = { Text("${loan.holderName} • Loan #${loan.loanNumber}\n\nThis permanently deletes the loan and its complete renewal and repayment history. This cannot be undone.") },
+        confirmButton = {
+            TextButton(
+                onClick = { vm.deleteLoan(loan.id); vm.screen = Screen.Loans },
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+            ) { Text("Delete permanently") }
+        },
+        dismissButton = { TextButton(onClick = { deleteDialog = false }) { Text("Cancel") } },
+    )
 }
 
 @Composable private fun DetailSection(title: String, rows: List<Pair<String, String>>) {

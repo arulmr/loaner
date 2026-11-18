@@ -11,6 +11,7 @@ Loaner is a private, offline-first Android app for tracking gold loans from bank
 - Bank due dates with 30-day orange and 7-day red warnings
 - Loan filtering and sorting
 - Closure amounts and renewal-cycle history
+- Permanent loan deletion with confirmation
 - Dashboard totals for active and closed loans
 - Optional local 4-digit PIN with an in-app keypad
 - Optional biometric unlock after a PIN is configured

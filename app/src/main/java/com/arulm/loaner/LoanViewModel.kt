@@ -36,6 +36,10 @@ class LoanViewModel(application: Application) : AndroidViewModel(application) {
         update(data.copy(loans = list))
     }
 
+    fun deleteLoan(id: String) {
+        update(data.copy(loans = data.loans.filterNot { it.id == id }))
+    }
+
     fun closeLoan(id: String, amount: Double, date: LocalDate) {
         data.loans.firstOrNull { it.id == id }?.let { saveLoan(it.copy(status = LoanStatus.CLOSED, closedOn = date, totalRepaid = amount)) }
     }
