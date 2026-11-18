@@ -52,14 +52,6 @@ class MainActivity : FragmentActivity() {
                                 .onFailure { error -> vm.message = "Import failed: ${error.message}" }
                         }
                     }
-                    val installPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-                        val update = pendingUpdate()
-                        if (update != null && packageManager.canRequestPackageInstalls()) {
-                            installApk(update) { vm.message = it }
-                        } else if (update != null) {
-                            vm.message = "Install permission was not enabled"
-                        }
-                    }
                     Box {
                         LoanerApp(
                             vm = vm,
@@ -81,7 +73,7 @@ class MainActivity : FragmentActivity() {
                                             } else {
                                                 vm.message = "Allow Loaner to install updates, then return to continue"
                                                 runCatching {
-                                                    installPermissionLauncher.launch(
+                                                    startActivity(
                                                         Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")),
                                                     )
                                                 }.onFailure {
