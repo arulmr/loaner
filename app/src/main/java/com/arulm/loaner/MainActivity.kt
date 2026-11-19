@@ -44,7 +44,19 @@ class MainActivity : FragmentActivity() {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     val scope = rememberCoroutineScope()
                     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-                        uri?.let { contentResolver.openOutputStream(it)?.bufferedWriter()?.use { writer -> writer.write(vm.exportJson()) } }
+                        uri?.let {
+                            scope.launch {
+                                val backup = vm.exportJson()
+                                runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        val stream = contentResolver.openOutputStream(it, "wt")
+                                            ?: error("Could not open the selected backup file")
+                                        stream.bufferedWriter().use { writer -> writer.write(backup) }
+                                    }
+                                }.onSuccess { vm.message = "Backup exported successfully" }
+                                    .onFailure { error -> vm.message = "Export failed: ${error.message}" }
+                            }
+                        }
                     }
                     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
                         uri?.let {
@@ -55,8 +67,14 @@ class MainActivity : FragmentActivity() {
                     Box {
                         LoanerApp(
                             vm = vm,
-                            onExport = { exportLauncher.launch("loaner-backup.json") },
-                            onImport = { importLauncher.launch(arrayOf("application/json", "text/plain")) },
+                            onExport = {
+                                runCatching { exportLauncher.launch("loaner-backup.json") }
+                                    .onFailure { vm.message = "Could not open backup destination: ${it.message}" }
+                            },
+                            onImport = {
+                                runCatching { importLauncher.launch(arrayOf("application/json", "text/plain")) }
+                                    .onFailure { vm.message = "Could not open backup picker: ${it.message}" }
+                            },
                             onCheckUpdates = {
                                 scope.launch {
                                     vm.message = "Checking for and downloading updates…"
