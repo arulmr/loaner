@@ -177,6 +177,15 @@ private fun DashboardScreen(vm: LoanViewModel) {
             }
         }
         item { SummaryCard("Active borrowed", money(borrowed), "${active.size} active loan${if (active.size == 1) "" else "s"}", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer) }
+        item { SummaryCard("Interest till today", money(interest), "Estimated using annual simple interest", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer) }
+        item { SummaryCard("Current total", money(borrowed + interest), "Principal + accrued interest", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer) }
+        item { SummaryCard("Extra paid on closed loans", money(extraPaid), "${closed.size} closed loan${if (closed.size == 1) "" else "s"}", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant) }
+        val urgent = active.filter { it.lenderType == LenderType.BANK && (LoanCalculator.figures(it).daysToDue ?: 999) <= 30 }
+        if (urgent.isNotEmpty()) {
+            item { Text("Needs attention", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            items(urgent) { loan -> CompactLoanCard(vm, loan) }
+        }
+        item { Text("Gold statistics", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -191,15 +200,7 @@ private fun DashboardScreen(vm: LoanViewModel) {
             }
         }
         item { SummaryCard("Average borrowed per gram", gold.borrowedPerGram?.let { "${money(it)} / g" } ?: "Not available", "Active loans: total principal ÷ total grams. Only loans with a weight are included.", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer) }
-        item { SummaryCard("Average repaid per gram", gold.repaidPerGram?.let { "${money(it)} / g" } ?: "Not available", "Closed loans: recorded closure repayments ÷ total grams. Excludes missing weights and previous renewal cycles.", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer) }
-        item { SummaryCard("Interest till today", money(interest), "Estimated using annual simple interest", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer) }
-        item { SummaryCard("Current total", money(borrowed + interest), "Principal + accrued interest", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer) }
-        item { SummaryCard("Extra paid on closed loans", money(extraPaid), "${closed.size} closed loan${if (closed.size == 1) "" else "s"}", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant) }
-        val urgent = active.filter { it.lenderType == LenderType.BANK && (LoanCalculator.figures(it).daysToDue ?: 999) <= 30 }
-        if (urgent.isNotEmpty()) {
-            item { Text("Needs attention", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-            items(urgent) { loan -> CompactLoanCard(vm, loan) }
-        }
+        item { SummaryCard("Average repaid per gram", gold.repaidPerGram?.let { "${money(it)} / g" } ?: "Not available", if (gold.repaymentIsEstimate) "Estimate: no closed loans in this selection. Active principal + accrued interest ÷ total grams. Missing weights excluded." else "Closed loans: recorded closure repayments ÷ total grams. Excludes missing weights and previous renewal cycles.", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer) }
     }
 }
 
