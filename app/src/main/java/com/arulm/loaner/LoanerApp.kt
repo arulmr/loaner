@@ -35,6 +35,7 @@ import java.util.Locale
 private val moneyFormat = NumberFormat.getCurrencyInstance(Locale("en", "IN"))
 private val displayDate: DateTimeFormatter = DateTimeFormatter.ofPattern("dd MMM yyyy")
 private fun money(value: Double) = moneyFormat.format(value)
+private fun grams(value: Double) = "${NumberFormat.getNumberInstance(Locale("en", "IN")).apply { maximumFractionDigits = 3 }.format(value)} g"
 private fun date(value: LocalDate) = value.format(displayDate)
 
 @Composable
@@ -154,6 +155,7 @@ private fun DashboardScreen(vm: LoanViewModel) {
     val matching = vm.data.loans.filter { (lenderType == null || it.lenderType == lenderType) && (lenderId == null || it.lenderId == lenderId) }
     val active = matching.filter { it.status == LoanStatus.ACTIVE }
     val closed = matching.filter { it.status == LoanStatus.CLOSED }
+    val gold = GoldSummary.from(matching)
     val borrowed = active.sumOf { it.loanAmount }
     val interest = active.sumOf { LoanCalculator.figures(it).interestTillDate }
     val extraPaid = closed.sumOf { (it.totalRepaid ?: 0.0) - it.loanAmount }.coerceAtLeast(0.0)
@@ -175,6 +177,21 @@ private fun DashboardScreen(vm: LoanViewModel) {
             }
         }
         item { SummaryCard("Active borrowed", money(borrowed), "${active.size} active loan${if (active.size == 1) "" else "s"}", MaterialTheme.colorScheme.primaryContainer, MaterialTheme.colorScheme.onPrimaryContainer) }
+        item {
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer, contentColor = MaterialTheme.colorScheme.onPrimaryContainer), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Gold pledged · active loans", style = MaterialTheme.typography.labelLarge)
+                    Text(grams(gold.totalGrams), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Box(Modifier.weight(1f)) { Metric("Banks", grams(gold.bankGrams)) }
+                        Box(Modifier.weight(1f)) { Metric("Pawn shops", grams(gold.pawnShopGrams)) }
+                    }
+                    Text("Loans without a gold weight are excluded.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        item { SummaryCard("Average borrowed per gram", gold.borrowedPerGram?.let { "${money(it)} / g" } ?: "Not available", "Active loans: total principal ÷ total grams. Only loans with a weight are included.", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer) }
+        item { SummaryCard("Average repaid per gram", gold.repaidPerGram?.let { "${money(it)} / g" } ?: "Not available", "Closed loans: recorded closure repayments ÷ total grams. Excludes missing weights and previous renewal cycles.", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer) }
         item { SummaryCard("Interest till today", money(interest), "Estimated using annual simple interest", MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer) }
         item { SummaryCard("Current total", money(borrowed + interest), "Principal + accrued interest", MaterialTheme.colorScheme.tertiaryContainer, MaterialTheme.colorScheme.onTertiaryContainer) }
         item { SummaryCard("Extra paid on closed loans", money(extraPaid), "${closed.size} closed loan${if (closed.size == 1) "" else "s"}", MaterialTheme.colorScheme.surfaceVariant, MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -281,6 +298,7 @@ private fun CompactLoanCard(vm: LoanViewModel, loan: Loan) {
                     Text(loan.holderName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(lender?.name ?: "Unknown lender", style = MaterialTheme.typography.bodyMedium)
                     Text("Loan #${loan.loanNumber}", style = MaterialTheme.typography.bodySmall)
+                    Text("Gold: ${loan.goldWeightGrams?.let(::grams) ?: "Not entered"}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                 }
                 Icon(Icons.Default.ChevronRight, "View loan details")
             }
