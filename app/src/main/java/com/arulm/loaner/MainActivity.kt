@@ -68,7 +68,8 @@ class MainActivity : FragmentActivity() {
                         LoanerApp(
                             vm = vm,
                             onExport = {
-                                runCatching { exportLauncher.launch("loaner-backup.json") }
+                                val filename = "loaner-backup-${java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss"))}.json"
+                                runCatching { exportLauncher.launch(filename) }
                                     .onFailure { vm.message = "Could not open backup destination: ${it.message}" }
                             },
                             onImport = {

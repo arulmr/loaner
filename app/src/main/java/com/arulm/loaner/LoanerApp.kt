@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -196,38 +198,59 @@ private fun DashboardScreen(vm: LoanViewModel) {
 
 @Composable
 private fun LoanListScreen(vm: LoanViewModel) {
-    var sort by remember { mutableStateOf(LoanSort.LOAN_DATE) }
+    var sort by remember { mutableStateOf<LoanSort?>(null) }
+    var showFilters by remember { mutableStateOf(false) }
     var type by remember { mutableStateOf<LenderType?>(null) }
     var lenderId by remember { mutableStateOf<String?>(null) }
     var holder by remember { mutableStateOf<String?>(null) }
     var status by remember { mutableStateOf(LoanStatus.ACTIVE) }
     val filtered = vm.data.loans.filter { loan ->
         loan.status == status && (type == null || loan.lenderType == type) && (lenderId == null || loan.lenderId == lenderId) && (holder == null || loan.holderName == holder)
-    }.sortedWith(compareByDescending { loan ->
-        when (sort) {
-            LoanSort.LOAN_DATE -> loan.loanDate.toEpochDay().toDouble()
-            LoanSort.LOAN_AMOUNT -> loan.loanAmount
-            LoanSort.TOTAL_AMOUNT -> LoanCalculator.figures(loan).totalAmount
-            LoanSort.INTEREST -> LoanCalculator.figures(loan).interestTillDate
-            LoanSort.DUE_DATE -> LoanCalculator.figures(loan).dueDate?.toEpochDay()?.toDouble() ?: Double.NEGATIVE_INFINITY
-        }
-    })
+    }
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(contentPadding = PaddingValues(12.dp, 12.dp, 12.dp, 88.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(contentPadding = PaddingValues(16.dp, 12.dp, 16.dp, 96.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     FilterChip(status == LoanStatus.ACTIVE, { status = LoanStatus.ACTIVE }, { Text("Active") })
                     FilterChip(status == LoanStatus.CLOSED, { status = LoanStatus.CLOSED }, { Text("Closed") })
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = { showFilters = !showFilters }) {
+                        Icon(Icons.Default.Tune, null)
+                        Spacer(Modifier.width(4.dp))
+                        Text(if (showFilters) "Hide" else "Filters")
+                    }
                 }
-                DropdownField("Sort by", sort, LoanSort.entries, { it.label }) { sort = it }
+                if (showFilters) {
+                NullableDropdown("Sort by", sort, LoanSort.entries, { it.label }) { sort = it }
+                Text("All = banks by due date; pawn shops by oldest loan date", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Box(Modifier.weight(1f)) { NullableDropdown("Lender type", type, LenderType.entries, { it.label }) { type = it; lenderId = null } }
                     Box(Modifier.weight(1f)) { NullableDropdown("Lender", lenderId, vm.data.lenders.filter { type == null || it.type == type }.map { it.id }, { id -> vm.data.lenders.firstOrNull { it.id == id }?.name ?: "" }) { lenderId = it } }
                 }
                 NullableDropdown("Loan holder", holder, vm.data.loans.map { it.holderName }.distinct().sorted(), { it }) { holder = it }
+                }
+                if (type != null || lenderId != null || holder != null || sort != null) {
+                    TextButton(onClick = { type = null; lenderId = null; holder = null; sort = null }) { Text("Reset filters & sorting") }
+                }
             }
             if (filtered.isEmpty()) item { EmptyState("No loans match these filters", "Create a loan or adjust the filters above.") }
-            items(filtered, key = { it.id }) { CompactLoanCard(vm, it) }
+            LenderType.entries.forEach { groupType ->
+                val group = LoanListOrdering.sort(filtered.filter { it.lenderType == groupType }, sort)
+                if (group.isNotEmpty()) {
+                    item(key = "heading-${groupType.name}") {
+                        Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(if (groupType == LenderType.BANK) Icons.Default.AccountBalance else Icons.Default.Store, null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(if (groupType == LenderType.BANK) "Bank loans" else "Pawn-shop loans", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                                Text(if (sort == null) { if (groupType == LenderType.BANK) "Earliest due date first" else "Oldest loan date first" } else "Sorted by ${sort!!.label.lowercase()}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text("${group.size}", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                    items(group, key = { it.id }) { CompactLoanCard(vm, it) }
+                }
+            }
         }
         FloatingActionButton(onClick = { vm.screen = Screen.EditLoan() }, modifier = Modifier.align(Alignment.BottomEnd).padding(18.dp)) {
             Icon(Icons.Default.Add, "Add loan")
@@ -248,23 +271,43 @@ private fun CompactLoanCard(vm: LoanViewModel, loan: Loan) {
     }
     Card(
         modifier = Modifier.fillMaxWidth().clickable { vm.screen = Screen.LoanDetails(loan.id) },
-        colors = CardDefaults.cardColors(containerColor = bg, contentColor = content), elevation = CardDefaults.cardElevation(2.dp),
+        shape = RoundedCornerShape(20.dp),
+        border = BorderStroke(1.dp, content.copy(alpha = 0.22f)),
+        colors = CardDefaults.cardColors(containerColor = bg, contentColor = content), elevation = CardDefaults.cardElevation(3.dp),
     ) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(loan.holderName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("${lender?.name ?: "Unknown lender"} • ${loan.loanNumber}", style = MaterialTheme.typography.bodySmall)
+                    Text(loan.holderName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text(lender?.name ?: "Unknown lender", style = MaterialTheme.typography.bodyMedium)
+                    Text("Loan #${loan.loanNumber}", style = MaterialTheme.typography.bodySmall)
                 }
-                Text(money(loan.loanAmount), fontWeight = FontWeight.Bold)
+                Icon(Icons.Default.ChevronRight, "View loan details")
             }
-            HorizontalDivider()
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Metric("Interest", money(figures.interestTillDate))
-                Metric("Total", money(figures.totalAmount))
-                Metric("Period", figures.period)
+            HorizontalDivider(color = content.copy(alpha = 0.18f))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Box(Modifier.weight(1f)) { Metric("Principal borrowed", money(loan.loanAmount)) }
+                Box(Modifier.weight(1f)) { Metric("Accrued interest", money(figures.interestTillDate)) }
             }
-            figures.dueDate?.let { due -> Text("Due ${date(due)}${figures.daysToDue?.let { " • ${if (it >= 0) "$it days left" else "${-it} days overdue"}" } ?: ""}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold) }
+            Column {
+                Text(if (loan.status == LoanStatus.CLOSED) "Total repaid" else "Total outstanding", style = MaterialTheme.typography.labelMedium)
+                Text(money(if (loan.status == LoanStatus.CLOSED) loan.totalRepaid ?: 0.0 else figures.totalAmount), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            }
+            HorizontalDivider(color = content.copy(alpha = 0.18f))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Box(Modifier.weight(1f)) { Metric("Loan date", date(loan.loanDate)) }
+                Box(Modifier.weight(1f)) { Metric("Elapsed period", figures.period) }
+            }
+            if (loan.status == LoanStatus.CLOSED) {
+                Text("Closed${loan.closedOn?.let { " • ${date(it)}" } ?: ""}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            } else figures.dueDate?.let { due ->
+                Surface(color = content.copy(alpha = 0.08f), contentColor = content, shape = RoundedCornerShape(10.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text("Due ${date(due)}", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        Text(figures.daysToDue?.let { if (it < 0) "${-it} days overdue" else if (it == 0L) "Due today" else "$it days remaining" } ?: "", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
         }
     }
 }
